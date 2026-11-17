@@ -1,0 +1,13 @@
+# Local build outputs
+/api
+/sync
+/worker
+/bin/
+
+# Local environment
+.env
+.env.local
+.DS_Store
+
+# PDF
+Labelling-platform-hiring-case 1.pdf

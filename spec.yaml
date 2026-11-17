@@ -1,0 +1,562 @@
+openapi: 3.0.3
+info:
+  title: Label Printing Platform API
+  version: 0.1.0
+servers:
+  - url: /v1
+tags:
+  - name: Printers
+  - name: Labels
+  - name: PrintJobs
+security:
+  - bearerAuth: []
+
+paths:
+  /printers:
+    get:
+      operationId: listPrinters
+      tags: [Printers]
+      summary: List active printers with their metadata
+      description: |
+        Printers are ordered by numeric ID ascending. Pass nextCursor (the last returned ID)
+        as cursor to fetch printers with greater IDs.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: |
+            A page of active printers and the time of the last successful printer sync.
+            If no active printers qualify, items is an empty array and nextCursor is null.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrinterList"
+              example:
+                items:
+                  - id: 1
+                    name: warehouse-printer-01
+                    model: label-printer-model-a
+                    isActive: true
+                    metadata:
+                      nickname: Packing station
+                      location: Warehouse A
+                      serialNumber: SN-123
+                lastSuccessfulSyncAt: "2026-11-17T10:00:00Z"
+                pagination:
+                  limit: 1
+                  nextCursor: "1"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: internal_error
+                message: Could not list printers.
+
+  /printers/{printerId}:
+    parameters:
+      - $ref: "#/components/parameters/PrinterId"
+    patch:
+      operationId: updatePrinterMetadata
+      tags: [Printers]
+      summary: Update metadata for an active printer
+      description: Omit a field to keep its current value. Send null to clear it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrinterMetadataPatch"
+            example:
+              nickname: null
+              location: Warehouse B
+      responses:
+        "200":
+          description: Printer with the updated metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Printer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: The printer is inactive or the ID does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /labels:
+    get:
+      operationId: listLabels
+      tags: [Labels]
+      summary: List active labels with their metadata
+      description: |
+        Labels are ordered by text ID ascending. Pass nextCursor (the last returned ID)
+        as cursor to fetch labels with greater IDs.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A page of active labels and the last successful label sync time. An empty page has an empty items array and a null nextCursor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LabelList"
+              example:
+                items:
+                  - id: label-123
+                    name: Shipping label
+                    version: "3"
+                    isActive: true
+                    metadata:
+                      nickname: Standard shipping
+                      isPrimary: true
+                lastSuccessfulSyncAt: "2026-11-17T10:00:00Z"
+                pagination:
+                  limit: 1
+                  nextCursor: label-123
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          description: The label inventory has never synced successfully, or a database error prevented the read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /labels/{labelId}:
+    parameters:
+      - $ref: "#/components/parameters/LabelId"
+    patch:
+      operationId: updateLabelMetadata
+      tags: [Labels]
+      summary: Update metadata for an active label
+      description: Omit a field to keep its value. Send null to clear nickname, or true or false to set isPrimary for this label.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LabelMetadataPatch"
+            example:
+              nickname: Standard shipping
+              isPrimary: true
+      responses:
+        "200":
+          description: Label with the updated metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Label"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: The label is inactive or the ID does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /print-jobs:
+    post:
+      operationId: createPrintJob
+      tags: [PrintJobs]
+      summary: Submit a print job
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePrintJob"
+            example:
+              printerId: 1
+              labelId: label-123
+      responses:
+        "202":
+          description: Job accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrintJob"
+              example:
+                id: 42
+                printerId: 1
+                labelId: label-123
+                observedLabelVersion: "3"
+                status: pending
+                createdAt: "2026-11-17T10:00:05Z"
+                updatedAt: "2026-11-17T10:00:05Z"
+                lastError: null
+        "200":
+          description: Same requester, key, printer ID, and label ID. Returns the existing job.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrintJob"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: This requester already used the key with a different printer ID or label ID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Maximum number of items to return.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: |
+        Pass nextCursor from the previous response.
+        Omit for the first page.
+        Invalid cursors return 400.
+      schema:
+        type: string
+        minLength: 1
+    PrinterId:
+      name: printerId
+      in: path
+      required: true
+      description: Stable database-generated numeric ID returned by the printer list.
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    LabelId:
+      name: labelId
+      in: path
+      required: true
+      description: |
+        Vendor label ID.
+        URL-encode it when used in a path.
+      schema:
+        type: string
+        minLength: 1
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Client-generated identifier for one intended job. Reuse it when retrying that request.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+        pattern: "^[A-Za-z0-9._:-]+$"
+      example: 33333333-3333-4333-8333-333333333333
+
+  schemas:
+    PrinterMetadata:
+      type: object
+      additionalProperties: false
+      required: [nickname, location, serialNumber]
+      properties:
+        nickname:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 255
+        location:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 255
+        serialNumber:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 255
+
+    PrinterMetadataPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        nickname:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 255
+        location:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 255
+        serialNumber:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 255
+
+    LabelMetadata:
+      type: object
+      additionalProperties: false
+      required: [nickname, isPrimary]
+      properties:
+        nickname:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 255
+        isPrimary:
+          type: boolean
+          description: Independent metadata flag with no uniqueness rule.
+
+    LabelMetadataPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        nickname:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 255
+        isPrimary:
+          type: boolean
+          description: Set or clear this label's independent flag.
+
+    Printer:
+      type: object
+      additionalProperties: false
+      required: [id, name, model, isActive, metadata]
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+          description: |
+            Printer ID. Maps to the vendor printer name,
+            which is assumed unique and stable.
+        name:
+          type: string
+          description: Vendor-owned printer name used when submitting to the vendor.
+        model:
+          type: string
+          description: Vendor-owned printer model.
+        isActive:
+          type: boolean
+          description: Present in the last successful local inventory snapshot.
+        metadata:
+          $ref: "#/components/schemas/PrinterMetadata"
+
+    Label:
+      type: object
+      additionalProperties: false
+      required: [id, name, version, isActive, metadata]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          description: Stable vendor label ID.
+        name:
+          type: string
+          description: Vendor-owned label name.
+        version:
+          type: string
+          description: Last observed vendor version.
+        isActive:
+          type: boolean
+          description: Present in the last successful local inventory snapshot.
+        metadata:
+          $ref: "#/components/schemas/LabelMetadata"
+
+    Pagination:
+      type: object
+      additionalProperties: false
+      required: [limit, nextCursor]
+      properties:
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Applied page size.
+        nextCursor:
+          type: string
+          nullable: true
+          minLength: 1
+          description: |
+            Pass this cursor to fetch the next page.
+            Returns null when no more results remain.
+
+    PrinterList:
+      type: object
+      additionalProperties: false
+      required: [items, lastSuccessfulSyncAt, pagination]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Printer"
+        lastSuccessfulSyncAt:
+          type: string
+          format: date-time
+          description: Time the last complete printer reconciliation committed.
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    LabelList:
+      type: object
+      additionalProperties: false
+      required: [items, lastSuccessfulSyncAt, pagination]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Label"
+        lastSuccessfulSyncAt:
+          type: string
+          format: date-time
+          description: Time the last complete label reconciliation committed.
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    CreatePrintJob:
+      type: object
+      additionalProperties: false
+      required: [printerId, labelId]
+      properties:
+        printerId:
+          type: integer
+          format: int64
+          minimum: 1
+        labelId:
+          type: string
+          minLength: 1
+
+    PrintJobStatus:
+      type: string
+      enum: [pending, processing, submitted, failed, unknown]
+      description: |
+        pending: Durably queued and not yet started by a worker.
+        processing: Started by a worker.
+        submitted: Vendor returned success. Physical printing is unconfirmed.
+        failed: Definitively rejected or safe pre-submission retries exhausted.
+        unknown: Submission may have happened. No automatic resubmission.
+
+    JobError:
+      type: object
+      nullable: true
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+
+    PrintJob:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - printerId
+        - labelId
+        - observedLabelVersion
+        - status
+        - createdAt
+        - updatedAt
+        - lastError
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+          description: PostgreSQL BIGINT identity generated when the job is inserted.
+        printerId:
+          type: integer
+          format: int64
+          minimum: 1
+        labelId:
+          type: string
+          minLength: 1
+        observedLabelVersion:
+          type: string
+          description: Local version observed at enqueue time, not a printing guarantee.
+        status:
+          $ref: "#/components/schemas/PrintJobStatus"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        lastError:
+          $ref: "#/components/schemas/JobError"
+
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Bad request.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Not authorized.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Forbidden.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InternalError:
+      description: Internal server error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
